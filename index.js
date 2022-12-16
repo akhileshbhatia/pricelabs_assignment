@@ -3,9 +3,7 @@ const haversine = require('haversine-distance');
 const { scrollPageToBottom } = require('puppeteer-autoscroll-down');
 const { writeFileSync } = require('fs');
 
-const minDistance = 2;
-
-const evaluate = async (page, origin, idAndDistance, idAndOtherInfo) => {
+const evaluate = async (page, origin, idAndDistance, idAndOtherInfo, minDistance = 2) => {
   const response = await page.waitForResponse(async response => {
     if (response.url() === 'https://www.vrbo.com/serp/g' && response.status() === 200) {
       const data = await response.json();
@@ -28,7 +26,20 @@ const evaluate = async (page, origin, idAndDistance, idAndOtherInfo) => {
   await scrollPageToBottom(page);
 }
 
-const getData = async () => {
+const getListingsPriceForNext12Months = async (sortedDistanceMap, idAndOtherInfo, page) => {
+  const keys = Array.from(sortedDistanceMap.keys()).splice(0, 50);
+  const listingPricesAndDistance = {};
+  for (key of keys) {
+    const { name, detailsUrl } = idAndOtherInfo.get(key);
+    await page.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
+    const content = await page.content();
+    const stringArr = content.substring(content.indexOf('"rentNights":'), content.indexOf(',"rentNightsConverted":')).split(':')[1];
+    listingPricesAndDistance[name] = { prices: JSON.parse(stringArr).splice(0, 365), distance: sortedDistanceMap.get(key) };
+  }
+  return listingPricesAndDistance;
+}
+
+const getListings = async () => {
   const browser = await puppeteer.launch({ headless: false });
   const page = await browser.newPage();
   await page.goto('https://www.vrbo.com/search/keywords:73-w-monroe-st-chicago-il-60603-usa/minNightlyPrice/0?filterByTotalPrice=true&petIncluded=false&ssr=true&adultsCount=1&childrenCount=0', { waitUntil: 'domcontentloaded' });
@@ -46,11 +57,11 @@ const getData = async () => {
     }
   }
   const sortedMap = new Map([...idAndDistance.entries()].sort((a, b) => a[1] - b[1]));
-  const detailsUrl = idAndOtherInfo.get(Array.from(sortedMap.keys())[0]).detailsUrl;
-  console.log(detailsUrl);
-  const newPage = await browser.newPage();
-  await newPage.goto(detailsUrl, { waitUntil: 'domcontentloaded' });
+  const listingPricesAndDistance = await getListingsPriceForNext12Months(sortedMap, idAndOtherInfo, page);
   await browser.close();
+
+  console.log(listingPricesAndDistance);
+  console.log(Object.keys(listingPricesAndDistance).length);
 };
 
-getData();
+getListings();
